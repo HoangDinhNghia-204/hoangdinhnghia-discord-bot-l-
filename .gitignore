@@ -1,0 +1,16 @@
+# File môi trường (CỰC KỲ QUAN TRỌNG)
+.env
+
+# Môi trường ảo Python
+venv/
+__pycache__/
+
+# Cài đặt của IDE/Editor
+.vscode/
+
+# File database
+*.db
+*.sqlite3
+
+# File không liên quan
+textdocument.html
