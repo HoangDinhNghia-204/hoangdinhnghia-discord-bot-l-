@@ -8,9 +8,5 @@ __pycache__/
 # Cài đặt của IDE/Editor
 .vscode/
 
-# File database
-*.db
-*.sqlite3
-
 # File không liên quan
 textdocument.html
