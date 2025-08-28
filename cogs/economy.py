@@ -48,7 +48,8 @@ SHOP_ITEMS = {
     "xp_booster": {"name": "Bùa Tăng XP (24h)", "price": 10000, "description": "Tăng 50% XP nhận được trong 24 giờ.", "emoji": "✨", "usable": True},
     "lottery_ticket": {"name": "Vé Xổ Số", "price": 100, "description": "Cơ hội trúng giải độc đắc!", "emoji": "🎟️", "usable": False},
     "coin_booster_3h": {"name": "Bùa Tăng Coin (3h)", "price": 7500, "description": "Tăng 25% coin nhận được từ tin nhắn trong 3 giờ.", "emoji": "💰", "usable": True},
-    "nickname_ticket": {"name": "Thẻ Đổi Tên", "price": 30000, "description": "Vào kho đồ để dùng.", "emoji": "🎫", "usable": True}
+    "nickname_ticket": {"name": "Thẻ Đổi Tên", "price": 30000, "description": "Vào kho đồ để dùng.", "emoji": "🎫", "usable": True},
+    "perm_damage_upgrade": {"name": "Linh Dược Sức Mạnh", "price": 10000, "description": "Tăng vĩnh viễn 5% sát thương gây ra lên World Boss. Mua để dùng ngay.", "emoji": "💪", "usable": False}
 }
 
 
@@ -164,19 +165,22 @@ class ShopView(discord.ui.View):
         self.all_items = all_items
         self.cog = cog
         self.current_page = 0
+        self.user_coins = 0  # Thêm biến để lưu coin, tránh query liên tục
 
     @classmethod
     async def create(cls, author: discord.Member, all_items: list, cog):
         view = cls(author, all_items, cog)
+        user_data = await db.get_or_create_user(author.id, author.guild.id)
+        view.user_coins = user_data.get('coins', 0)
         await view.update_components()
         return view
 
     async def create_embed(self) -> discord.Embed:
         item = self.all_items[self.current_page]
-        user_data = await db.get_or_create_user(self.author.id, self.author.guild.id)
         embed = discord.Embed(color=discord.Color.teal())
         embed.set_author(
             name=f"Cửa Hàng Dành Cho {self.author.display_name}", icon_url=self.author.display_avatar.url)
+
         if 'role_id' in item:
             role = self.author.guild.get_role(item['role_id'])
             if not role:
@@ -195,60 +199,116 @@ class ShopView(discord.ui.View):
                 name="Giá Bán", value=f"**{item['price']:,}** coin", inline=True)
             embed.add_field(name="Mã Vật Phẩm",
                             value=f"`{item['id']}`", inline=True)
+
         embed.add_field(name="\u200b", value="-"*40, inline=False)
         embed.add_field(name="Số Dư Của Bạn",
-                        value=f"💰 **{user_data['coins']:,}** coin", inline=True)
+                        value=f"💰 **{self.user_coins:,}** coin", inline=True)
         embed.set_footer(
             text=f"Trang {self.current_page + 1}/{len(self.all_items)}")
         return embed
 
     async def update_components(self):
-        if not self.all_items:
-            for child in self.children:
-                child.disabled = True
-            return
-        current_item = self.all_items[self.current_page]
+        # Cập nhật nút lật trang
         self.children[0].disabled = self.current_page == 0
-        self.children[1].disabled = self.current_page == len(
+        self.children[1].disabled = self.current_page >= len(
             self.all_items) - 1
-        self.children[2].label = f"Mua ({current_item['price']:,} coin)"
-        if 'role_id' in current_item:
-            role = self.author.guild.get_role(current_item['role_id'])
-            self.children[2].disabled = not role or role in self.author.roles
-        else:
-            self.children[2].disabled = False
 
-    async def show_current_page(self, interaction: discord.Interaction):
+        if not self.all_items:
+            for i in range(2, 5):
+                self.children[i].disabled = True
+            return
+
+        current_item = self.all_items[self.current_page]
+        price = current_item['price']
+        is_unique_item = 'role_id' in current_item or current_item.get(
+            'id') == 'perm_damage_upgrade'
+
+        # Cập nhật các nút mua hàng
+        quantities = [1, 5, 10]
+        for i, qty in enumerate(quantities):
+            button_index = i + 2  # Nút mua bắt đầu từ index 2
+            button = self.children[button_index]
+
+            if is_unique_item and qty > 1:
+                button.disabled = True
+                button.label = f"Mua x{qty}"
+                button.style = discord.ButtonStyle.secondary
+                continue
+
+            total_cost = price * qty
+            button.label = f"Mua x{qty} ({total_cost:,} coin)"
+
+            if self.user_coins < total_cost:
+                button.disabled = True
+                button.style = discord.ButtonStyle.secondary
+            else:
+                button.disabled = False
+                button.style = discord.ButtonStyle.green
+
+    # --- CÁC NÚT BẤM ---
+
+    @discord.ui.button(label="⬅️ Trước", style=discord.ButtonStyle.secondary, row=0)
+    async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author.id:
+            return await interaction.response.send_message("Đây không phải cửa hàng của bạn!", ephemeral=True)
+
+        # Cập nhật trang
+        self.current_page -= 1
+
+        # Cập nhật lại toàn bộ giao diện
         await self.update_components()
         embed = await self.create_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="⬅️ Trước", style=discord.ButtonStyle.secondary, row=0)
-    async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user != self.author:
-            return await interaction.response.send_message("Đây không phải cửa hàng của bạn!", ephemeral=True)
-        self.current_page -= 1
-        await self.show_current_page(interaction)
-
     @discord.ui.button(label="Sau ➡️", style=discord.ButtonStyle.secondary, row=0)
     async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user != self.author:
+        if interaction.user.id != self.author.id:
             return await interaction.response.send_message("Đây không phải cửa hàng của bạn!", ephemeral=True)
-        self.current_page += 1
-        await self.show_current_page(interaction)
 
-    @discord.ui.button(emoji="🛍️", style=discord.ButtonStyle.green, row=1)
-    async def buy_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user != self.author:
+        # Cập nhật trang
+        self.current_page += 1
+
+        # Cập nhật lại toàn bộ giao diện
+        await self.update_components()
+        embed = await self.create_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    # cogs/economy.py -> class ShopView
+
+    async def _buy_item_callback(self, interaction: discord.Interaction, quantity: int):
+        if interaction.user.id != self.author.id:
+            # Gửi thông báo ẩn nếu không phải người dùng
             return await interaction.response.send_message("Đây không phải cửa hàng của bạn!", ephemeral=True)
+
         item_to_buy = self.all_items[self.current_page]
-        user_data = await db.get_or_create_user(interaction.user.id, interaction.guild.id)
         price = item_to_buy['price']
-        if user_data['coins'] < price:
-            return await interaction.response.send_message(f"Bạn không đủ coin.", ephemeral=True)
-        await db.update_coins(interaction.user.id, interaction.guild.id, -price)
-        await self.cog.update_shop_achievements(interaction, price)
-        if 'role_id' in item_to_buy:
+        total_cost = price * quantity
+
+        # Bước 1: Defer để có thời gian xử lý
+        await interaction.response.defer()
+
+        # Bước 2: Kiểm tra lại số dư coin một lần nữa
+        current_user_data = await db.get_or_create_user(interaction.user.id, interaction.guild.id)
+        if current_user_data['coins'] < total_cost:
+            # Nếu không đủ tiền, chỉ cập nhật lại view và thông báo lỗi qua followup
+            self.user_coins = current_user_data['coins']
+            await self.update_components()
+            embed = await self.create_embed()
+            await interaction.edit_original_response(embed=embed, view=self)
+            return await interaction.followup.send("Bạn không đủ coin để thực hiện giao dịch này.", ephemeral=True)
+
+        # Bước 3: Thực hiện giao dịch
+        await db.update_coins(interaction.user.id, interaction.guild.id, -total_cost)
+        await self.cog.update_shop_achievements(interaction, total_cost)
+
+        item_id = item_to_buy.get('id')
+
+        # Bước 4: Tạo tin nhắn thông báo thành công
+        success_message = ""
+        if item_id == 'perm_damage_upgrade':
+            await db.update_perm_damage_bonus(interaction.user.id, interaction.guild.id, 0.05)
+            success_message = f"✅ Bạn đã mua **{item_to_buy['name']}**! Sát thương vĩnh viễn lên Boss tăng 5%."
+        elif 'role_id' in item_to_buy:
             role = interaction.guild.get_role(item_to_buy['role_id'])
             await interaction.user.add_roles(role, reason="Mua từ shop")
             duration_seconds = item_to_buy['duration_seconds']
@@ -256,20 +316,37 @@ class ShopView(discord.ui.View):
                 expiry = datetime.datetime.now(
                     datetime.timezone.utc) + datetime.timedelta(seconds=duration_seconds)
                 await db.add_temporary_role(interaction.user.id, interaction.guild.id, role.id, expiry.isoformat())
-            await interaction.response.send_message(f"Bạn đã mua thành công role {role.mention}!", ephemeral=True)
+            success_message = f"✅ Bạn đã mua thành công role **{role.mention}**!"
         else:
-            item_id = item_to_buy['id']
-            await db.add_item_to_inventory(interaction.user.id, interaction.guild.id, item_id, 1)
+            await db.add_item_to_inventory(interaction.user.id, interaction.guild.id, item_id, quantity)
             if item_id == 'lottery_ticket':
-                await db.add_lottery_tickets(interaction.guild.id, interaction.user.id, 1)
-                await interaction.response.send_message(f"Bạn đã mua thành công 1 vé xổ số!", ephemeral=True)
-            else:
-                await interaction.response.send_message(f"Bạn đã mua thành công **{item_to_buy['name']}** và đã được cất vào kho đồ.", ephemeral=True)
-        await self.show_current_page(interaction)
+                await db.add_lottery_tickets(interaction.guild.id, interaction.user.id, quantity)
+            success_message = f"✅ Bạn đã mua thành công **x{quantity} {item_to_buy['name']}**!"
 
-    @discord.ui.button(label="Đóng", style=discord.ButtonStyle.red, row=1)
+        # Bước 5: Cập nhật giao diện với thông báo tạm thời
+        new_user_data = await db.get_or_create_user(self.author.id, self.author.guild.id)
+        self.user_coins = new_user_data.get('coins', 0)
+        await self.update_components()
+        embed = await self.create_embed()
+
+        # Chỉnh sửa tin nhắn shop, thêm `content` là thông báo
+        await interaction.edit_original_response(content=success_message, embed=embed, view=self)
+
+    @discord.ui.button(label="Mua x1", style=discord.ButtonStyle.green, row=1, custom_id="buy_1")
+    async def buy_one(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._buy_item_callback(interaction, 1)
+
+    @discord.ui.button(label="Mua x5", style=discord.ButtonStyle.green, row=1, custom_id="buy_5")
+    async def buy_five(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._buy_item_callback(interaction, 5)
+
+    @discord.ui.button(label="Mua x10", style=discord.ButtonStyle.green, row=1, custom_id="buy_10")
+    async def buy_ten(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._buy_item_callback(interaction, 10)
+
+    @discord.ui.button(label="Đóng", style=discord.ButtonStyle.red, row=2)
     async def close_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user != self.author:
+        if interaction.user.id != self.author.id:
             return await interaction.response.send_message("Đây không phải cửa hàng của bạn!", ephemeral=True)
         await interaction.message.delete()
 
@@ -509,10 +586,13 @@ class Economy(commands.Cog):
             color=discord.Color.green(),
             timestamp=datetime.datetime.now(datetime.timezone.utc)
         )
-        embed.add_field(name="Người gửi", value=f"`{ctx.author.display_name}`", inline=True)
-        embed.add_field(name="Người nhận", value=f"`{member.display_name}`", inline=True)
-        embed.set_footer(text=f"ID Giao dịch: {ctx.interaction.id if ctx.interaction else ctx.message.id}")
-        
+        embed.add_field(name="Người gửi",
+                        value=f"`{ctx.author.display_name}`", inline=True)
+        embed.add_field(name="Người nhận",
+                        value=f"`{member.display_name}`", inline=True)
+        embed.set_footer(
+            text=f"ID Giao dịch: {ctx.interaction.id if ctx.interaction else ctx.message.id}")
+
         await ctx.send(embed=embed)
 
     @commands.hybrid_group(name="lottery", description="Các lệnh liên quan đến mini-game xổ số.")

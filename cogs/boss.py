@@ -225,19 +225,32 @@ class Boss(commands.Cog):
                 )
 
         user_data = await db.get_or_create_user(author.id, guild.id)
-        damage = random.randint(50, 150) + (user_data['level'] * 10)
-        await db.update_boss_hp(guild.id, damage)
-        await db.log_attack(guild.id, author.id, damage)
-        await interaction.response.send_message(f"💥 Bạn đã tấn công **{boss_data['boss_name']}** và gây ra **{damage:,}** sát thương!", ephemeral=True)
+
+        # --- LOGIC TÍNH SÁT THƯƠNG MỚI ---
+        base_damage = random.randint(
+            50, 150) + (user_data.get('level', 1) * 10)
+        perm_bonus_percent = user_data.get('perm_damage_bonus', 0.0)
+
+        final_damage = int(base_damage * (1 + perm_bonus_percent))
+
+        await db.update_boss_hp(guild.id, final_damage)
+        await db.log_attack(guild.id, author.id, final_damage)
+
+        response_text = f"💥 Bạn đã tấn công **{boss_data['boss_name']}** và gây ra **{final_damage:,}** sát thương!"
+        if perm_bonus_percent > 0:
+            response_text += f"\n*Nhờ có Linh Dược, sát thương của bạn được tăng **{perm_bonus_percent:.0%}**!*"
+
+        await interaction.response.send_message(response_text, ephemeral=True)
+        # --- KẾT THÚC LOGIC MỚI ---
 
         new_boss_data = await db.get_boss(guild.id)
         try:
             boss_msg = interaction.message
-
             if new_boss_data['current_hp'] <= 0:
-                defeated_embed = discord.Embed(
-                    title=f"🏆 {new_boss_data['boss_name']} ĐÃ BỊ HẠ GỤC!", description="Chi tiết phần thưởng đã được gửi đến kênh thông báo của server.", color=discord.Color.dark_grey())
-                await boss_msg.edit(embed=defeated_embed, view=None)
+                try:
+                    await boss_msg.delete()
+                except (discord.NotFound, discord.HTTPException):
+                    pass  # Bỏ qua nếu tin nhắn đã bị xóa
 
                 attackers = await db.get_all_attackers(guild.id)
                 total_damage = sum(p['total_damage'] for p in attackers)
@@ -288,7 +301,7 @@ class Boss(commands.Cog):
                     item_reward_text = ""
                     if random.random() < 0.20:
                         droppable_items = {
-                            k: v for k, v in SHOP_ITEMS.items() if k != 'lottery_ticket'}
+                            k: v for k, v in SHOP_ITEMS.items() if k not in ['lottery_ticket', 'perm_damage_upgrade']}
                         if droppable_items:
                             dropped_item_id = random.choice(
                                 list(droppable_items.keys()))
@@ -308,24 +321,17 @@ class Boss(commands.Cog):
                     victory_embed, all_reward_lines, per_page)
                 victory_embed.set_footer(text=f"Trang 1/{view.max_pages}")
 
-                config = await db.get_or_create_config(guild.id)
-                announcement_channel_id = config.get('announcement_channel_id')
-                target_channel = self.bot.get_channel(
-                    announcement_channel_id) or interaction.channel
-
-                await target_channel.send(embed=victory_embed, view=view if view.max_pages > 1 else None)
-
-                # --- PHẦN NÂNG CẤP ---
-                if not announcement_channel_id:
-                    await target_channel.send("ℹ️ Gợi ý: Dùng lệnh `/set announcement` để đặt kênh thông báo riêng cho các sự kiện như thế này.", delete_after=20)
+                try:
+                    # Đây là dòng quan trọng, nó đảm bảo tin nhắn được gửi vào đúng kênh đã diễn ra tương tác
+                    await interaction.channel.send(embed=victory_embed, view=view if view.max_pages > 1 else None)
+                except (discord.Forbidden, discord.HTTPException) as e:
+                    print(f"Lỗi khi gửi tin nhắn chiến thắng boss: {e}")
 
                 await db.delete_boss(guild.id)
                 await db.clear_attackers(guild.id)
 
             else:
-                # Lấy danh sách những người đã tấn công, đã được sắp xếp
                 attackers = await db.get_all_attackers(guild.id)
-                # Tạo embed mới với dữ liệu xếp hạng
                 new_embed = create_boss_embed(
                     guild, new_boss_data, attackers_data=attackers)
                 await boss_msg.edit(embed=new_embed)

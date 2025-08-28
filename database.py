@@ -21,6 +21,11 @@ def run_migrations(cursor):
         print(" > Migration: Đang thêm cột 'daily_timestamp' vào bảng users...")
         cursor.execute("ALTER TABLE users ADD COLUMN daily_timestamp TEXT")
 
+    if 'perm_damage_bonus' not in user_columns:
+        print(" > Migration: Đang thêm cột 'perm_damage_bonus' vào bảng users...")
+        cursor.execute(
+            "ALTER TABLE users ADD COLUMN perm_damage_bonus REAL DEFAULT 0.0 NOT NULL")
+
     # --- Migration cho bảng 'shop_roles' ---
     try:
         shop_roles_cols_info = cursor.execute(
@@ -83,6 +88,19 @@ def run_migrations(cursor):
         cursor.execute(
             "ALTER TABLE server_configs ADD COLUMN create_vc_channel_id INTEGER")
         print("   ✅ Migration cho 'create_vc_channel_id' hoàn tất!")
+    if 'log_channel_id' not in config_columns:
+        print(" > Migration: Đang thêm cột 'log_channel_id' vào bảng server_configs...")
+        cursor.execute(
+            "ALTER TABLE server_configs ADD COLUMN log_channel_id INTEGER")
+    print("   ✅ Migration cho 'log_channel_id' hoàn tất!")
+
+    if 'main_chat_channel_id' not in config_columns:
+        print(
+            " > Migration: Đang thêm cột 'main_chat_channel_id' vào bảng server_configs...")
+        cursor.execute(
+            "ALTER TABLE server_configs ADD COLUMN main_chat_channel_id INTEGER")
+    print("   ✅ Migration cho 'main_chat_channel_id' hoàn tất!")
+
     # --- Migration cho bảng 'auctions' ---
     try:
         auction_columns = [info[1] for info in cursor.execute(
@@ -215,7 +233,7 @@ def init_db():
 
     cursor.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER NOT NULL, guild_id INTEGER NOT NULL, xp REAL DEFAULT 0, level INTEGER DEFAULT 1, coins INTEGER DEFAULT 0 NOT NULL, daily_timestamp TEXT, PRIMARY KEY (user_id, guild_id))''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS warnings (warning_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, guild_id INTEGER NOT NULL, moderator_id INTEGER NOT NULL, reason TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS server_configs (guild_id INTEGER PRIMARY KEY, welcome_channel_id INTEGER, goodbye_channel_id INTEGER, announcement_channel_id INTEGER, command_channel_id INTEGER, muted_role_id INTEGER, luck_role_id INTEGER, top_role_id INTEGER, vip_role_id INTEGER, debtor_role_id INTEGER, create_vc_channel_id INTEGER)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS server_configs (guild_id INTEGER PRIMARY KEY, welcome_channel_id INTEGER, goodbye_channel_id INTEGER, announcement_channel_id INTEGER, command_channel_id INTEGER, muted_role_id INTEGER, luck_role_id INTEGER, top_role_id INTEGER, vip_role_id INTEGER, debtor_role_id INTEGER, create_vc_channel_id INTEGER, log_channel_id INTEGER, main_chat_channel_id INTEGER)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS level_roles (guild_id INTEGER NOT NULL, level INTEGER NOT NULL, role_id INTEGER NOT NULL, PRIMARY KEY (guild_id, level))''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS lottery_tickets (guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, tickets_bought INTEGER DEFAULT 0, PRIMARY KEY (guild_id, user_id))''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS inventory (guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, item_id TEXT NOT NULL, quantity INTEGER DEFAULT 1, PRIMARY KEY (guild_id, user_id, item_id))''')
@@ -917,4 +935,11 @@ async def get_temp_vc_by_channel(channel_id):
 async def remove_temp_vc(channel_id):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("DELETE FROM temp_voice_channels WHERE channel_id = ?", (channel_id,))
+        await db.commit()
+
+
+async def update_perm_damage_bonus(user_id, guild_id, bonus_to_add):
+    """Cộng thêm bonus sát thương vĩnh viễn cho người dùng."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("UPDATE users SET perm_damage_bonus = perm_damage_bonus + ? WHERE user_id = ? AND guild_id = ?", (bonus_to_add, user_id, guild_id))
         await db.commit()

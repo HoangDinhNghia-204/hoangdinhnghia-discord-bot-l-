@@ -292,6 +292,36 @@ class Moderation(commands.Cog):
         await db.update_config(ctx.guild.id, 'command_channel_id', channel.id)
         await ctx.send(f"✅ Đã đặt kênh lệnh là {channel.mention}. XP và Coin sẽ không được tính ở đây.", ephemeral=True)
 
+    @_set.command(name="logchannel", description="Đặt kênh để ghi lại các hoạt động quan trọng của server.")
+    @checks.has_permissions(manage_guild=True)
+    @app_commands.rename(channel="kênh")
+    async def set_logchannel(self, ctx: commands.Context, channel: discord.TextChannel):
+        # Kiểm tra quyền của bot trong kênh đó
+        bot_member = ctx.guild.me
+        permissions = channel.permissions_for(bot_member)
+        if not permissions.send_messages or not permissions.embed_links:
+            return await ctx.send(
+                f"❌ Bot thiếu quyền `Send Messages` hoặc `Embed Links` trong kênh {channel.mention}. Vui lòng cấp quyền trước khi cài đặt.",
+                ephemeral=True
+            )
+        await db.update_config(ctx.guild.id, 'log_channel_id', channel.id)
+        await ctx.send(f"✅ Đã đặt kênh log hoạt động là {channel.mention}.", ephemeral=True)
+
+    @_set.command(name="mainchat", description="Đặt kênh chat chính để thông báo khi có thành viên mới.")
+    @checks.has_permissions(manage_guild=True)
+    @app_commands.rename(channel="kênh")
+    async def set_mainchat(self, ctx: commands.Context, channel: discord.TextChannel):
+        # Kiểm tra quyền của bot trong kênh đó
+        bot_member = ctx.guild.me
+        permissions = channel.permissions_for(bot_member)
+        if not permissions.send_messages or not permissions.mention_everyone:
+            return await ctx.send(
+                f"❌ Bot thiếu quyền `Send Messages` hoặc `Mention @everyone` trong kênh {channel.mention}. Vui lòng cấp quyền trước khi cài đặt.",
+                ephemeral=True
+            )
+        await db.update_config(ctx.guild.id, 'main_chat_channel_id', channel.id)
+        await ctx.send(f"✅ Đã đặt kênh chat chính là {channel.mention}. Bot sẽ ping @everyone ở đây khi có người mới.", ephemeral=True)
+
     @_set.command(name="mutedrole", description="Đặt role để cấm chat thành viên.")
     @checks.has_permissions(manage_guild=True)
     @app_commands.rename(role="role")

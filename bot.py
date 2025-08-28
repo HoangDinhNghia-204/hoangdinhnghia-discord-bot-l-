@@ -61,8 +61,8 @@ bot = CommunityBot(command_prefix='?', intents=intents, help_command=None)
 async def on_ready():
     """Sự kiện được kích hoạt sau khi setup_hook đã chạy xong."""
     print(f'Bot đã đăng nhập với tên: {bot.user}')
-    db.init_db()  # Khởi tạo cơ sở dữ liệu khi bot sẵn sàng
-    await bot.change_presence(activity=discord.Game(name="?help để xem mọi thứ"))
+    db.init_db()
+    await bot.change_presence(activity=discord.Game(name="/help để xem mọi thứ"))
     print("Bot đã sẵn sàng!")
 
 

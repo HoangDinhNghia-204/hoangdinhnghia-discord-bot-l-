@@ -129,6 +129,29 @@ class General(commands.Cog):
         if level_cog := self.bot.get_cog('LevelSystem'):
             await level_cog.update_level_role(member, 1)
 
+        if (main_chat_id := config.get('main_chat_channel_id')) and (main_chat_channel := self.bot.get_channel(main_chat_id)):
+            try:
+                # Tạo một embed đơn giản, thân thiện
+                chat_embed = discord.Embed(
+                    description=f"Cả nhà ơi, cùng chào đón thành viên mới **{member.display_name}** đã gia nhập ngôi nhà chung của chúng ta nào! 🎉",
+                    color=discord.Color.random()
+                )
+
+                # Gửi tin nhắn ping @everyone và @thành_viên_mới
+                await main_chat_channel.send(
+                    content=f"@everyone Chào mừng {member.mention}!",
+                    embed=chat_embed,
+                    # Đảm bảo bot có quyền ping
+                    allowed_mentions=discord.AllowedMentions(
+                        everyone=True, users=True)
+                )
+            except discord.Forbidden:
+                print(
+                    f"Lỗi: Bot không có quyền gửi tin nhắn hoặc ping @everyone trong kênh chat chính của server {member.guild.name}")
+            except Exception as e:
+                print(
+                    f"Lỗi không xác định khi gửi thông báo chào mừng ở kênh chat: {e}")
+
     @commands.Cog.listener()
     async def on_member_remove(self, member):
         config = await db.get_or_create_config(member.guild.id)
