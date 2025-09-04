@@ -250,8 +250,8 @@ def init_db():
     cursor.execute('''CREATE TABLE IF NOT EXISTS world_boss (guild_id INTEGER PRIMARY KEY, boss_name TEXT NOT NULL, current_hp INTEGER NOT NULL, max_hp INTEGER NOT NULL, message_id INTEGER, channel_id INTEGER, spawned_by_id INTEGER)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS boss_attackers (guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, total_damage INTEGER DEFAULT 0, last_attack_timestamp TEXT, PRIMARY KEY (guild_id, user_id))''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS pinned_messages (pin_id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL, channel_id INTEGER NOT NULL, author_id INTEGER NOT NULL, message_content TEXT, embed_data TEXT, last_message_id INTEGER)''')
-    cursor.execute(
-        '''CREATE TABLE IF NOT EXISTS temp_voice_channels (guild_id INTEGER NOT NULL, creator_id INTEGER NOT NULL, channel_id INTEGER PRIMARY KEY)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS temp_voice_channels (guild_id INTEGER NOT NULL, creator_id INTEGER NOT NULL, channel_id INTEGER PRIMARY KEY)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS qotd (question_id INTEGER PRIMARY KEY AUTOINCREMENT, question_text TEXT NOT NULL, is_used INTEGER DEFAULT 0)''')
     run_migrations(cursor)
     populate_initial_quests()
     populate_initial_achievements()
