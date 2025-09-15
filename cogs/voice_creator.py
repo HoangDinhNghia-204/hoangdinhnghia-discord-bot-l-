@@ -14,6 +14,7 @@ class VoiceCreator(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
         if member.bot:
@@ -22,55 +23,49 @@ class VoiceCreator(commands.Cog):
         config = await db.get_or_create_config(member.guild.id)
         creator_channel_id = config.get('create_vc_channel_id')
 
-        # --- Logic Xóa Kênh Tự Động ---
-        # Kiểm tra kênh người dùng vừa rời khỏi
+        # --- Logic Xóa Kênh Tự Động (PHIÊN BẢN CẢI TIẾN) ---
         if before.channel and before.channel.id != creator_channel_id:
-            # Kiểm tra xem kênh đó có phải là kênh tạm thời không
             is_temp_channel = await db.get_temp_vc_by_channel(before.channel.id)
             if is_temp_channel:
-                # Nếu kênh trống sau khi người dùng rời đi
-                if len(before.channel.members) == 0:
-                    try:
-                        await before.channel.delete(reason="Kênh tạm thời không còn ai sử dụng.")
-                        await db.remove_temp_vc(before.channel.id)
-                    except discord.Forbidden:
-                        print(
-                            f"Lỗi: Bot không có quyền xóa kênh voice {before.channel.name}")
-                    except discord.NotFound:
-                        # Kênh có thể đã bị xóa thủ công
-                        await db.remove_temp_vc(before.channel.id)
+                await asyncio.sleep(1)
+                try:
+                    fresh_channel = await self.bot.fetch_channel(before.channel.id)
+                    if len(fresh_channel.members) == 0:
+                        try:
+                            await fresh_channel.delete(reason="Kênh tạm thời không còn ai sử dụng.")
+                            await db.remove_temp_vc(fresh_channel.id)
+                            print(
+                                f"Đã tự động xóa kênh tạm thời: {fresh_channel.name} (ID: {fresh_channel.id})")
+                        except discord.Forbidden:
+                            print(
+                                f"Lỗi quyền: Bot không thể xóa kênh voice {fresh_channel.name}")
+                        except discord.NotFound:
+                            await db.remove_temp_vc(fresh_channel.id)
+                except discord.NotFound:
+                    await db.remove_temp_vc(before.channel.id)
+                    return
 
+        # --- Logic Tạo kênh (giữ nguyên như cũ) ---
         if after.channel and after.channel.id == creator_channel_id:
             guild = member.guild
             category = after.channel.category
-
             channel_name = f"┇﹢˚ও・🏠・{member.display_name} ᴛịɴʜ ᴛʜấᴛ"
 
             overwrites = {
                 guild.default_role: discord.PermissionOverwrite(view_channel=True, connect=True),
                 member: discord.PermissionOverwrite(
-                    # Cho phép quản lý (đổi tên, set limit)
-                    manage_channels=True,
-                    manage_roles=True,  # Cho phép quản lý quyền kênh
-                    move_members=True,  # Cho phép kéo người khác
-                    mute_members=True,  # Cho phép tắt mic
-                    deafen_members=True  # Cho phép điếc
+                    manage_channels=True, manage_roles=True, move_members=True,
+                    mute_members=True, deafen_members=True
                 )
             }
 
             try:
-                # Tạo kênh voice mới
                 new_channel = await guild.create_voice_channel(
-                    name=channel_name,
-                    category=category,
-                    overwrites=overwrites,
-                    reason=f"Kênh tạm thời được tạo bởi {member.name}"
+                    name=channel_name, category=category, overwrites=overwrites,
+                    rtc_region='singapore', reason=f"Tạo kênh tạm thời cho {member.name}"
                 )
-
-                # Di chuyển người dùng vào kênh mới của họ
                 await member.move_to(new_channel)
-
-                # Lưu thông tin kênh mới vào database
+                await new_channel.edit(rtc_region='hongkong', reason="Tự động chuyển vùng mặc định")
                 await db.add_temp_vc(guild.id, member.id, new_channel.id)
 
             except discord.Forbidden:

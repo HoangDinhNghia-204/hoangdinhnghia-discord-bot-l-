@@ -2,15 +2,17 @@
 import aiosqlite
 import sqlite3  # Vẫn giữ lại để dùng cho các hàm khởi tạo đồng bộ
 import datetime
+import json
+import random
 
 DB_NAME = 'bot_data.db'
 
 
 def run_migrations(cursor):
-    """Kiểm tra và nâng cấp cấu trúc DB một cách an toàn. (Hàm này vẫn chạy đồng bộ lúc khởi tạo)"""
+    """Kiểm tra và nâng cấp cấu trúc DB một cách an toàn."""
     print("Bắt đầu kiểm tra và di trú cơ sở dữ liệu...")
 
-    # --- Migration cho bảng 'users' ---
+    # --- Bảng 'users' ---
     user_columns = [info[1] for info in cursor.execute(
         "PRAGMA table_info(users)").fetchall()]
     if 'coins' not in user_columns:
@@ -20,88 +22,43 @@ def run_migrations(cursor):
     if 'daily_timestamp' not in user_columns:
         print(" > Migration: Đang thêm cột 'daily_timestamp' vào bảng users...")
         cursor.execute("ALTER TABLE users ADD COLUMN daily_timestamp TEXT")
-
     if 'perm_damage_bonus' not in user_columns:
         print(" > Migration: Đang thêm cột 'perm_damage_bonus' vào bảng users...")
         cursor.execute(
             "ALTER TABLE users ADD COLUMN perm_damage_bonus REAL DEFAULT 0.0 NOT NULL")
 
-    # --- Migration cho bảng 'shop_roles' ---
+    # --- Bảng 'shop_roles' ---
     try:
         shop_roles_cols_info = cursor.execute(
             "PRAGMA table_info(shop_roles)").fetchall()
         if shop_roles_cols_info:
             shop_roles_cols = [info[1] for info in shop_roles_cols_info]
-            if 'duration_days' in shop_roles_cols and 'duration_seconds' not in shop_roles_cols:
-                print(" > Migration: Nâng cấp bảng 'shop_roles' (duration)...")
-                cursor.execute(
-                    "ALTER TABLE shop_roles RENAME TO shop_roles_old")
-                cursor.execute('''
-                CREATE TABLE shop_roles (
-                    guild_id INTEGER NOT NULL, role_id INTEGER NOT NULL,
-                    price INTEGER NOT NULL, duration_seconds INTEGER NOT NULL,
-                    PRIMARY KEY (guild_id, role_id)
-                )''')
-                cursor.execute('''
-                INSERT INTO shop_roles (guild_id, role_id, price, duration_seconds)
-                SELECT guild_id, role_id, price, duration_days * 86400 FROM shop_roles_old
-                ''')
-                cursor.execute("DROP TABLE shop_roles_old")
-                print("   ✅ Migration duration cho 'shop_roles' hoàn tất!")
-                shop_roles_cols = [info[1] for info in cursor.execute(
-                    "PRAGMA table_info(shop_roles)").fetchall()]
-
             if 'description' not in shop_roles_cols:
                 print(" > Migration: Đang thêm cột 'description' vào bảng shop_roles...")
                 cursor.execute(
                     "ALTER TABLE shop_roles ADD COLUMN description TEXT")
                 print("   ✅ Migration description cho 'shop_roles' hoàn tất!")
-
     except sqlite3.OperationalError:
         pass
 
-    # --- Migration cho bảng 'server_configs' ---
+    # --- Bảng 'server_configs' ---
     config_columns = [info[1] for info in cursor.execute(
         "PRAGMA table_info(server_configs)").fetchall()]
-    if 'muted_role_id' not in config_columns:
-        cursor.execute(
-            "ALTER TABLE server_configs ADD COLUMN muted_role_id INTEGER")
-    if 'luck_role_id' not in config_columns:
-        cursor.execute(
-            "ALTER TABLE server_configs ADD COLUMN luck_role_id INTEGER")
-    if 'top_role_id' not in config_columns:
-        cursor.execute(
-            "ALTER TABLE server_configs ADD COLUMN top_role_id INTEGER")
-    if 'vip_role_id' not in config_columns:
-        cursor.execute(
-            "ALTER TABLE server_configs ADD COLUMN vip_role_id INTEGER")
-    if 'debtor_role_id' not in config_columns:
-        cursor.execute(
-            "ALTER TABLE server_configs ADD COLUMN debtor_role_id INTEGER")
+    cols_to_add = {
+        'muted_role_id': 'INTEGER', 'luck_role_id': 'INTEGER', 'top_role_id': 'INTEGER',
+        'vip_role_id': 'INTEGER', 'debtor_role_id': 'INTEGER', 'rainbow_role_id': 'INTEGER',
+        'create_vc_channel_id': 'INTEGER', 'log_channel_id': 'INTEGER', 'main_chat_channel_id': 'INTEGER',
+        'member_count_channel_id': 'INTEGER', 'user_count_channel_id': 'INTEGER', 'bot_count_channel_id': 'INTEGER'
+    }
+    for col, col_type in cols_to_add.items():
+        if col not in config_columns:
+            print(
+                f" > Migration: Đang thêm cột '{col}' vào bảng server_configs...")
+            cursor.execute(
+                f"ALTER TABLE server_configs ADD COLUMN {col} {col_type}")
+            print(f"   ✅ Migration cho '{col}' hoàn tất!")
 
-    if 'rainbow_role_id' not in config_columns:
-        cursor.execute(
-            "ALTER TABLE server_configs ADD COLUMN rainbow_role_id INTEGER")
-    if 'create_vc_channel_id' not in config_columns:
-        print(
-            " > Migration: Đang thêm cột 'create_vc_channel_id' vào bảng server_configs...")
-        cursor.execute(
-            "ALTER TABLE server_configs ADD COLUMN create_vc_channel_id INTEGER")
-        print("   ✅ Migration cho 'create_vc_channel_id' hoàn tất!")
-    if 'log_channel_id' not in config_columns:
-        print(" > Migration: Đang thêm cột 'log_channel_id' vào bảng server_configs...")
-        cursor.execute(
-            "ALTER TABLE server_configs ADD COLUMN log_channel_id INTEGER")
-    print("   ✅ Migration cho 'log_channel_id' hoàn tất!")
-
-    if 'main_chat_channel_id' not in config_columns:
-        print(
-            " > Migration: Đang thêm cột 'main_chat_channel_id' vào bảng server_configs...")
-        cursor.execute(
-            "ALTER TABLE server_configs ADD COLUMN main_chat_channel_id INTEGER")
-    print("   ✅ Migration cho 'main_chat_channel_id' hoàn tất!")
-
-    # --- Migration cho bảng 'auctions' ---
+    # --- Bảng 'auctions' ---
     try:
         auction_columns = [info[1] for info in cursor.execute(
             "PRAGMA table_info(auctions)").fetchall()]
@@ -115,7 +72,7 @@ def run_migrations(cursor):
     except sqlite3.OperationalError:
         pass
 
-    # --- MIGRATION ĐẶC BIỆT: Chuyển achievements từ ảnh sang emoji ---
+    # --- Bảng 'achievements' ---
     try:
         ach_columns = [info[1] for info in cursor.execute(
             "PRAGMA table_info(achievements)").fetchall()]
@@ -203,6 +160,247 @@ def populate_initial_quests():
         f" > Đã kiểm tra và thêm/cập nhật {len(quests_data)} nhiệm vụ mẫu vào database.")
 
 
+def populate_initial_trivia():
+    """Thêm các câu hỏi đố vui mẫu vào DB nếu chưa có."""
+    trivia_data = [
+        # ======================================================================
+        # Lĩnh vực: GAME (Mở rộng)
+        # ======================================================================
+        ('Trong game Liên Minh Huyền Thoại, chiêu cuối của Yasuo có tên là gì?',
+         '["Trăn Trối", "Bão Kiếm", "Quét Kiếm", "Đoạt Mệnh"]', 'Trăn Trối', 'Game'),
+        ('Trong Valorant, chiêu cuối "Đại Băng Địa Chấn" (Glacial Cascade) thuộc về đặc vụ nào?',
+         '["Sova", "Sage", "Breach", "Omen"]', 'Breach', 'Game'),
+        ('Loại gỗ nào KHÔNG tồn tại trong Minecraft phiên bản gốc (không mod)?',
+         '["Gỗ Sồi", "Gỗ Thông", "Gỗ Anh Đào", "Gỗ Tùng"]', 'Gỗ Tùng', 'Game'),
+        ('Trong game "Among Us", nhiệm vụ nào thường bị nghi ngờ là "fake task" nhất?',
+         '["Quẹt thẻ (Card Swipe)", "Sửa dây điện (Fix Wiring)", "Dọn lá cây (Clean O2 Filter)", "Đổ rác (Empty Garbage)"]', 'Quẹt thẻ (Card Swipe)', 'Game'),
+        ('Tựa game nào có nhân vật chính tên là "Geralt of Rivia"?',
+         '["The Witcher 3: Wild Hunt", "Elden Ring", "Skyrim", "Dark Souls"]', 'The Witcher 3: Wild Hunt', 'Game'),
+        ('Trong CS:GO/CS2, khẩu súng nào đắt tiền nhất trong game?',
+         '["AK-47", "AWP", "Negev", "M4A4"]', 'Negev', 'Game'),
+        ('Nhân vật Mario trong series game của Nintendo làm nghề gì?',
+         '["Thợ sửa ống nước", "Đầu bếp", "Bác sĩ", "Phi hành gia"]', 'Thợ sửa ống nước', 'Game'),
+        ('Trong PUBG, "Sanhok" là bản đồ lấy cảm hứng từ khu vực nào?',
+         '["Đông Nam Á", "Sa mạc Châu Phi", "Vùng băng tuyết Nga", "Châu Âu Trung Cổ"]', 'Đông Nam Á', 'Game'),
+        ('Trong Genshin Impact, nguyên tố nào khắc chế nguyên tố Thủy (Hydro)?',
+         '["Hỏa (Pyro)", "Lôi (Electro)", "Băng (Cryo)", "Tất cả các đáp án trên"]', 'Tất cả các đáp án trên', 'Game'),
+        ('Tựa game nào được coi là "cha đẻ" của thể loại MOBA?',
+         '["League of Legends", "Dota 2", "Smite", "DotA (map của Warcraft III)"]', 'DotA (map của Warcraft III)', 'Game'),
+        ('Trong "The Last of Us", đại dịch toàn cầu bị gây ra bởi loại nấm nào?',
+         '["Cordyceps", "Amanita", "Psilocybe", "Morel"]', 'Cordyceps', 'Game'),
+        ('Nhân vật "Master Chief" là biểu tượng của dòng game nào?',
+         '["Call of Duty", "Battlefield", "Halo", "Gears of War"]', 'Halo', 'Game'),
+        ('Trong game "Pokémon", Pikachu là loài Pokémon hệ gì?',
+         '["Lửa", "Nước", "Điện", "Cỏ"]', 'Điện', 'Game'),
+        ('Thành phố "Los Santos" trong Grand Theft Auto V dựa trên thành phố nào ngoài đời thực?',
+         '["New York", "Miami", "Los Angeles", "Chicago"]', 'Los Angeles', 'Game'),
+        ('Trong Dota 2, "Aegis of the Immortal" cho phép người giữ nó làm gì?',
+         '["Tăng sát thương", "Bất tử trong 5 giây", "Hồi sinh sau khi chết", "Tăng tốc độ chạy"]', 'Hồi sinh sau khi chết', 'Game'),
+
+        # ======================================================================
+        # Lĩnh vực: ĐỊA LÝ & DU LỊCH (Mở rộng)
+        # ======================================================================
+        ('Thủ đô của Úc là gì?',
+         '["Sydney", "Melbourne", "Canberra", "Perth"]', 'Canberra', 'Địa lý'),
+        ('Ngọn núi nào cao nhất thế giới?',
+         '["K2", "Kangchenjunga", "Lhotse", "Everest"]', 'Everest', 'Địa lý'),
+        ('Quốc gia nào có diện tích lớn nhất thế giới?',
+         '["Canada", "Trung Quốc", "Mỹ", "Nga"]', 'Nga', 'Địa lý'),
+        ('Thủ đô của Canada là gì?',
+         '["Toronto", "Vancouver", "Montreal", "Ottawa"]', 'Ottawa', 'Địa lý'),
+        ('Con sông nào dài nhất thế giới?',
+         '["Sông Nile", "Sông Amazon", "Sông Dương Tử", "Sông Mississippi"]', 'Sông Nile', 'Địa lý'),
+        ('Kim Tự Tháp Giza nổi tiếng nằm ở quốc gia nào?',
+         '["Ả Rập Xê Út", "Ma Rốc", "Ai Cập", "Sudan"]', 'Ai Cập', 'Địa lý'),
+        ('Thành phố nào được mệnh danh là "Thành phố không ngủ"?',
+         '["Tokyo", "New York", "Las Vegas", "London"]', 'New York', 'Địa lý'),
+        ('Quốc gia nào được mệnh danh là "Xứ sở Mặt trời mọc"?',
+         '["Hàn Quốc", "Trung Quốc", "Nhật Bản", "Thái Lan"]', 'Nhật Bản', 'Địa lý'),
+        ('Eo biển nào ngăn cách châu Á và châu Mỹ?',
+         '["Eo biển Gibraltar", "Eo biển Malacca", "Eo biển Bering", "Eo biển Dover"]', 'Eo biển Bering', 'Địa lý'),
+        ('Quốc gia nào có hình dạng giống như một chiếc ủng?',
+         '["Hy Lạp", "Ý (Italy)", "Tây Ban Nha", "Na Uy"]', 'Ý (Italy)', 'Địa lý'),
+        ('Thác nước cao nhất thế giới là thác nào?',
+         '["Thác Niagara", "Thác Victoria", "Thác Angel", "Thác Iguazu"]', 'Thác Angel', 'Địa lý'),
+        ('Sa mạc lớn nhất thế giới là sa mạc nào?',
+         '["Sahara", "Gobi", "Kalahari", "Nam Cực"]', 'Nam Cực', 'Địa lý'),
+        ('Vạn Lý Trường Thành nằm ở quốc gia nào?',
+         '["Mông Cổ", "Nhật Bản", "Hàn Quốc", "Trung Quốc"]', 'Trung Quốc', 'Địa lý'),
+
+        # ======================================================================
+        # Lĩnh vực: KHOA HỌC & TỰ NHIÊN (Mở rộng)
+        # ======================================================================
+        ('Nguyên tố hóa học nào có ký hiệu là "Au"?',
+         '["Bạc", "Nhôm", "Vàng", "Oxy"]', 'Vàng', 'Khoa học'),
+        ('Hành tinh nào được biết đến với tên gọi "Hành tinh Đỏ"?',
+         '["Sao Hỏa", "Sao Kim", "Sao Mộc", "Sao Thổ"]', 'Sao Hỏa', 'Khoa học'),
+        ('Loài động vật nào trên cạn chạy nhanh nhất?',
+         '["Sư tử", "Linh dương", "Báo Gêpa", "Ngựa vằn"]', 'Báo Gêpa', 'Khoa học'),
+        ('Nước chiếm bao nhiêu phần trăm bề mặt Trái Đất?',
+         '["Khoảng 50%", "Khoảng 60%", "Khoảng 70%", "Khoảng 80%"]', 'Khoảng 70%', 'Khoa học'),
+        ('Công thức hóa học của nước là gì?',
+         '["CO2", "O2", "H2O", "NaCl"]', 'H2O', 'Khoa học'),
+        ('Âm thanh di chuyển nhanh nhất trong môi trường nào?',
+         '["Không khí", "Nước", "Chân không", "Chất rắn"]', 'Chất rắn', 'Khoa học'),
+        ('Nguyên tố nào phổ biến nhất trong vũ trụ?',
+         '["Oxy", "Carbon", "Hydro", "Heli"]', 'Hydro', 'Khoa học'),
+        ('Ký hiệu hóa học của Thủy ngân là gì?',
+         '["Ag", "Pb", "Hg", "Sn"]', 'Hg', 'Khoa học'),
+        ('Lực nào giữ cho các hành tinh quay quanh Mặt trời?',
+         '["Lực hấp dẫn", "Lực từ", "Lực hạt nhân", "Lực ma sát"]', 'Lực hấp dẫn', 'Khoa học'),
+        ('Cá voi xanh, loài động vật lớn nhất hành tinh, thuộc lớp nào?',
+         '["Lớp Cá", "Lớp Bò sát", "Lớp Lưỡng cư", "Lớp Thú (Động vật có vú)"]', 'Lớp Thú (Động vật có vú)', 'Khoa học'),
+        ('Cây nào cao nhất thế giới?',
+         '["Cây Bao báp", "Cây Bạch đàn", "Cây Gỗ đỏ (Redwood)", "Cây Tùng"]', 'Cây Gỗ đỏ (Redwood)', 'Khoa học'),
+        ('Con người có bao nhiêu cặp nhiễm sắc thể?',
+         '["22", "23", "46", "48"]', '23', 'Khoa học'),
+        ('Khí nào cần thiết cho sự sống của thực vật (quang hợp)?',
+         '["Oxy (O2)", "Nitơ (N2)", "Carbon Dioxide (CO2)", "Hydro (H2)"]', 'Carbon Dioxide (CO2)', 'Khoa học'),
+
+        # ======================================================================
+        # Lĩnh vực: LỊCH SỬ & THẦN THOẠI (Mở rộng)
+        # ======================================================================
+        ('Trong thần thoại Hy Lạp, ai là vị thần của biển cả?',
+         '["Zeus", "Hades", "Apollo", "Poseidon"]', 'Poseidon', 'Lịch sử & Thần thoại'),
+        ('Ai là vị vua đầu tiên của nhà Nguyễn ở Việt Nam?',
+         '["Vua Quang Trung", "Vua Gia Long", "Vua Minh Mạng", "Vua Tự Đức"]', 'Vua Gia Long', 'Lịch sử & Thần thoại'),
+        ('Vị tướng nào đã lãnh đạo trận chiến Điện Biên Phủ năm 1954?',
+         '["Võ Nguyên Giáp", "Hoàng Văn Thái", "Lê Trọng Tấn", "Trần Văn Trà"]', 'Võ Nguyên Giáp', 'Lịch sử & Thần thoại'),
+        ('Trong thần thoại Bắc Âu, "Mjolnir" là tên cây búa của vị thần nào?',
+         '["Odin", "Loki", "Thor", "Heimdall"]', 'Thor', 'Lịch sử & Thần thoại'),
+        ('Thành phố Pompeii bị chôn vùi bởi ngọn núi lửa nào?',
+         '["Etna", "Vesuvius", "Stromboli", "Fuji"]', 'Vesuvius', 'Lịch sử & Thần thoại'),
+        ('Ai là nữ pharaoh nổi tiếng nhất của Ai Cập cổ đại?',
+         '["Nefertiti", "Cleopatra", "Hatshepsut", "Ankhesenamun"]', 'Cleopatra', 'Lịch sử & Thần thoại'),
+        ('Nhà thám hiểm nào được cho là người châu Âu đầu tiên tìm ra châu Mỹ?',
+         '["Ferdinand Magellan", "Vasco da Gama", "Christopher Columbus", "Marco Polo"]', 'Christopher Columbus', 'Lịch sử & Thần thoại'),
+        ('Cuộc chiến tranh thế giới thứ nhất bắt đầu vào năm nào?',
+         '["1905", "1914", "1920", "1939"]', '1914', 'Lịch sử & Thần thoại'),
+        ('Ai là người đã viết ra "Binh pháp Tôn Tử"?',
+         '["Khổng Tử", "Lão Tử", "Tôn Tử", "Tào Tháo"]', 'Tôn Tử', 'Lịch sử & Thần thoại'),
+
+        # ======================================================================
+        # Lĩnh vực: VĂN HỌC & PHIM ẢNH (Mở rộng)
+        # ======================================================================
+        ('Trong series phim Harry Potter, con gia tinh nhà Malfoy tên là gì?',
+         '["Kreacher", "Winky", "Dobby", "Hokey"]', 'Dobby', 'Văn học & Phim'),
+        ('Bộ phim nào đã giành giải "Phim hay nhất" tại Oscar năm 2020?',
+         '["1917", "Joker", "Once Upon a Time in Hollywood", "Parasite (Ký sinh trùng)"]', 'Parasite (Ký sinh trùng)', 'Văn học & Phim'),
+        ('Trong "Chúa tể những chiếc nhẫn", có tổng cộng bao nhiêu chiếc nhẫn quyền lực được tạo ra ban đầu?',
+         '["1", "9", "19", "20"]', '20', 'Văn học & Phim'),
+        ('Ai là tác giả của bộ truyện "Dế Mèn phiêu lưu ký"?',
+         '["Nam Cao", "Ngô Tất Tố", "Tô Hoài", "Vũ Trọng Phụng"]', 'Tô Hoài', 'Văn học & Phim'),
+        ('Trong vũ trụ Marvel, viên đá vô cực nào cho phép người dùng du hành thời gian?',
+         '["Đá Không Gian (Space Stone)", "Đá Thời Gian (Time Stone)", "Đá Thực Tại (Reality Stone)", "Đá Sức Mạnh (Power Stone)"]', 'Đá Thời Gian (Time Stone)', 'Văn học & Phim'),
+        ('Bộ phim "Mắt Biếc" được chuyển thể từ tác phẩm của nhà văn nào?',
+         '["Nguyễn Nhật Ánh", "Nam Cao", "Nguyễn Ngọc Tư", "Trang Hạ"]', 'Nguyễn Nhật Ánh', 'Văn học & Phim'),
+        ('Trong "Star Wars", câu nói "May the Force be with you" có ý nghĩa gì?',
+         '["Chúc may mắn", "Mạnh mẽ lên", "Nguyện Thần lực ở bên bạn", "Hãy cẩn thận"]', 'Nguyện Thần lực ở bên bạn', 'Văn học & Phim'),
+        ('Nhân vật thám tử Sherlock Holmes sống ở địa chỉ nào tại London?',
+         '["221B phố Baker", "10 phố Downing", "42 phố Wallaby", "12 phố Grimmauld"]', '221B phố Baker', 'Văn học & Phim'),
+        ('Bộ phim nào có câu thoại nổi tiếng "I\'ll be back"?',
+         '["Rambo", "Die Hard", "The Terminator (Kẻ hủy diệt)", "Predator"]', 'The Terminator (Kẻ hủy diệt)', 'Văn học & Phim'),
+        ('Trong truyện cổ tích "Nàng Bạch Tuyết và bảy chú lùn", chú lùn nào hay hắt xì?',
+         '["Dopey (Ngốc Nghếch)", "Grumpy (Gắt Gỏng)", "Sleepy (Ngái Ngủ)", "Sneezy (Hắt Xì)"]', 'Sneezy (Hắt Xì)', 'Văn học & Phim'),
+
+        # ======================================================================
+        # Lĩnh vực: ÂM NHẠC (Mở rộng)
+        # ======================================================================
+        ('Bài hát "See You Again" là nhạc phim của bộ phim nào?',
+         '["Fast & Furious 7", "The Avengers", "Avatar", "Titanic"]', 'Fast & Furious 7', 'Âm nhạc'),
+        ('Ca khúc nào của Sơn Tùng M-TP đạt 100 triệu view nhanh nhất trên YouTube Việt Nam?',
+         '["Lạc Trôi", "Nơi Này Có Anh", "Hãy Trao Cho Anh", "Chúng Ta Không Thuộc Về Nhau"]', 'Hãy Trao Cho Anh', 'Âm nhạc'),
+        ('Nhóm nhạc K-Pop nào được mệnh danh là "Những vị vua của K-Pop"?',
+         '["EXO", "BIGBANG", "BTS", "NCT"]', 'BIGBANG', 'Âm nhạc'),
+        ('Ai được mệnh danh là "Ông hoàng nhạc Pop"?',
+         '["Elvis Presley", "Michael Jackson", "Freddie Mercury", "Elton John"]', 'Michael Jackson', 'Âm nhạc'),
+        ('Nhạc cụ nào có 88 phím?',
+         '["Guitar", "Violin", "Piano", "Sáo"]', 'Piano', 'Âm nhạc'),
+        ('Taylor Swift nổi tiếng với thể loại nhạc nào ở giai đoạn đầu sự nghiệp?',
+         '["Pop", "Rock", "Country (Đồng quê)", "Hip Hop"]', 'Country (Đồng quê)', 'Âm nhạc'),
+        ('Nhóm nhạc huyền thoại The Beatles đến từ thành phố nào của Anh?',
+         '["London", "Manchester", "Liverpool", "Birmingham"]', 'Liverpool', 'Âm nhạc'),
+        ('Trong Rap Việt, ai là huấn luyện viên có thí sinh vô địch cả 2 mùa đầu tiên?',
+         '["Binz", "Wowy", "Karik", "Suboi"]', 'Karik', 'Âm nhạc'),
+
+        # ======================================================================
+        # Lĩnh vực: ĐỐ VUI IQ & MẸO VẶT (Mở rộng)
+        # ======================================================================
+        ('Câu đố mẹo: Con gì đầu dê mình ốc?',
+         '["Con ốc", "Con dê", "Con dốc", "Một loài sinh vật lạ"]', 'Con dốc', 'Đố Vui IQ'),
+        ('Cái gì luôn đến nhưng không bao giờ đến nơi?',
+         '["Ngày mai", "Quá khứ", "Cơn mưa", "Giấc mơ"]', 'Ngày mai', 'Đố Vui IQ'),
+        ('Trong bảng chữ cái tiếng Việt, chữ cái nào đứng cuối cùng?',
+         '["Y", "X", "W", "V"]', 'Y', 'Đố Vui IQ'),
+        ('Tháng nào có 28 ngày?',
+         '["Tháng 2", "Tháng 4", "Tháng 6", "Tất cả các tháng"]', 'Tất cả các tháng', 'Đố Vui IQ'),
+        ('Có 1 đàn chim đậu trên cành, người thợ săn bắn "Rằm". Hỏi chết mấy con?',
+         '["1 con", "15 con", "0 con", "Cả đàn"]', '15 con', 'Đố Vui IQ'),
+        ('Cái gì bạn có thể giữ sau khi đã đưa nó cho người khác?',
+         '["Tiền bạc", "Bí mật", "Lời hứa", "Đồ vật"]', 'Lời hứa', 'Đố Vui IQ'),
+        ('Một người nông dân có 17 con cừu, tất cả trừ 9 con bị chết. Hỏi ông còn lại bao nhiêu con?',
+         '["8 con", "17 con", "9 con", "0 con"]', '9 con', 'Đố Vui IQ'),
+        ('Bác sĩ đưa cho bạn 3 viên thuốc và bảo bạn uống mỗi viên cách nhau nửa giờ. Bạn sẽ mất bao lâu để uống hết?',
+         '["Nửa giờ", "Một giờ", "Một giờ rưỡi", "Hai giờ"]', 'Một giờ', 'Đố Vui IQ'),
+        ('Cái gì đi lên nhưng không bao giờ đi xuống?',
+         '["Tuổi của bạn", "Nhiệt độ", "Giá xăng", "Mặt trời"]', 'Tuổi của bạn', 'Đố Vui IQ'),
+
+        # ======================================================================
+        # Lĩnh vực: ANIME & MANGA (Mở rộng)
+        # ======================================================================
+        ('Trong "One Piece", trái ác quỷ của Monkey D. Luffy tên là gì?',
+         '["Gomu Gomu no Mi", "Mera Mera no Mi", "Ope Ope no Mi", "Gura Gura no Mi"]', 'Gomu Gomu no Mi', 'Anime & Manga'),
+        ('Trong "Naruto", Làng Lá có tên chính thức là gì?',
+         '["Konohagakure", "Sunagakure", "Kirigakure", "Kumogakure"]', 'Konohagakure', 'Anime & Manga'),
+        ('Tác giả của bộ manga "Dragon Ball" (7 Viên Ngọc Rồng) là ai?',
+         '["Masashi Kishimoto", "Eiichiro Oda", "Akira Toriyama", "Hajime Isayama"]', 'Akira Toriyama', 'Anime & Manga'),
+        ('Trong "Attack on Titan", Titan Shifter nào có khả năng hóa cứng cơ thể?',
+         '["Titan Thiết Giáp", "Titan Đại Hình", "Titan Nữ Hình", "Tất cả các đáp án trên"]', 'Tất cả các đáp án trên', 'Anime & Manga'),
+        ('Bộ anime nào có nhân vật chính tên là "Saitama"?',
+         '["My Hero Academia", "Jujutsu Kaisen", "One-Punch Man", "Demon Slayer"]', 'One-Punch Man', 'Anime & Manga'),
+        ('Trong "Demon Slayer" (Kimetsu no Yaiba), em gái của Tanjiro tên là gì?',
+         '["Shinobu", "Kanao", "Nezuko", "Mitsuri"]', 'Nezuko', 'Anime & Manga'),
+        ('Bộ anime "Spirited Away" (Vùng Đất Linh Hồn) là tác phẩm của studio nào?',
+         '["Kyoto Animation", "Madhouse", "Ufotable", "Studio Ghibli"]', 'Studio Ghibli', 'Anime & Manga'),
+        ('Trong "Jujutsu Kaisen", "Vô Lượng Không Xứ" là Lãnh địa của ai?',
+         '["Sukuna", "Gojo Satoru", "Megumi Fushiguro", "Itadori Yuji"]', 'Gojo Satoru', 'Anime & Manga'),
+        ('Trong "Death Note", "L" là biệt danh của ai?',
+         '["Light Yagami", "Ryuk", "L Lawliet", "Misa Amane"]', 'L Lawliet', 'Anime & Manga'),
+
+        # ======================================================================
+        # Lĩnh vực: KIẾN THỨC CHUNG & ĐỘC LẠ (Mới)
+        # ======================================================================
+        ('Màu sắc nào KHÔNG có trong lá cờ Olympic?',
+         '["Đen", "Vàng", "Xanh lá", "Tím"]', 'Tím', 'Kiến thức chung'),
+        ('Con người có bao nhiêu giác quan cơ bản?',
+         '["3", "5", "6", "7"]', '5', 'Kiến thức chung'),
+        ('Website nào được ra mắt đầu tiên trong số các website sau?',
+         '["Facebook", "YouTube", "Google", "Twitter"]', 'Google', 'Kiến thức chung'),
+        ('"Checkmate" là thuật ngữ kết thúc một ván cờ gì?',
+         '["Cờ Tỷ Phú", "Cờ Vua", "Cờ Tướng", "Cờ Caro"]', 'Cờ Vua', 'Kiến thức chung'),
+        ('Trong bảng mã Morse, ba dấu chấm (...) đại diện cho chữ cái nào?',
+         '["A", "O", "S", "E"]', 'S', 'Kiến thức chung'),
+        ('Một "baker\'s dozen" (tá của thợ làm bánh) có bao nhiêu chiếc?',
+         '["10", "12", "13", "24"]', '13', 'Kiến thức chung'),
+        ('Logo của hãng xe Lamborghini có hình con vật gì?',
+         '["Ngựa", "Báo", "Sư tử", "Bò tót"]', 'Bò tót', 'Kiến thức chung'),
+        ('Sân bay nào có mã IATA là "LAX"?',
+         '["Sân bay London Heathrow", "Sân bay Los Angeles", "Sân bay Charles de Gaulle", "Sân bay Nội Bài"]', 'Sân bay Los Angeles', 'Kiến thức chung'),
+        ('Loại cà phê nào đắt nhất thế giới, được làm từ phân của một loài động vật?',
+         '["Arabica", "Robusta", "Cà phê Chồn (Kopi Luwak)", "Espresso"]', 'Cà phê Chồn (Kopi Luwak)', 'Kiến thức chung'),
+        ('Mật ong có thể bị hỏng không?',
+         '["Có, sau 1 năm", "Có, sau 5 năm", "Không bao giờ hỏng", "Có, nếu để trong tủ lạnh"]', 'Không bao giờ hỏng', 'Kiến thức chung'),
+    ]
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.executemany(
+        "INSERT OR IGNORE INTO trivia_questions (question_text, options, correct_answer, category) VALUES (?, ?, ?, ?)", trivia_data)
+    conn.commit()
+    conn.close()
+    print(
+        f" > Đã kiểm tra và thêm/cập nhật {len(trivia_data)} câu hỏi đố vui vào database.")
+
+
 def populate_initial_achievements():
     """Cập nhật các thành tựu. (Hàm này vẫn chạy đồng bộ lúc khởi tạo)"""
     achievements_data_with_emoji = {
@@ -250,11 +448,16 @@ def init_db():
     cursor.execute('''CREATE TABLE IF NOT EXISTS world_boss (guild_id INTEGER PRIMARY KEY, boss_name TEXT NOT NULL, current_hp INTEGER NOT NULL, max_hp INTEGER NOT NULL, message_id INTEGER, channel_id INTEGER, spawned_by_id INTEGER)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS boss_attackers (guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, total_damage INTEGER DEFAULT 0, last_attack_timestamp TEXT, PRIMARY KEY (guild_id, user_id))''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS pinned_messages (pin_id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL, channel_id INTEGER NOT NULL, author_id INTEGER NOT NULL, message_content TEXT, embed_data TEXT, last_message_id INTEGER)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS temp_voice_channels (guild_id INTEGER NOT NULL, creator_id INTEGER NOT NULL, channel_id INTEGER PRIMARY KEY)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS qotd (question_id INTEGER PRIMARY KEY AUTOINCREMENT, question_text TEXT NOT NULL, is_used INTEGER DEFAULT 0)''')
+    cursor.execute(
+        '''CREATE TABLE IF NOT EXISTS temp_voice_channels (guild_id INTEGER NOT NULL, creator_id INTEGER NOT NULL, channel_id INTEGER PRIMARY KEY)''')
+    cursor.execute(
+        '''CREATE TABLE IF NOT EXISTS qotd (question_id INTEGER PRIMARY KEY AUTOINCREMENT, question_text TEXT NOT NULL, is_used INTEGER DEFAULT 0)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS trivia_questions (question_id INTEGER PRIMARY KEY AUTOINCREMENT, question_text TEXT NOT NULL, options TEXT NOT NULL, correct_answer TEXT NOT NULL, category TEXT, is_used INTEGER DEFAULT 0)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS active_trivia (message_id INTEGER PRIMARY KEY, guild_id INTEGER NOT NULL, channel_id INTEGER NOT NULL, correct_answer TEXT NOT NULL, expiry_timestamp TEXT NOT NULL, answered_users_json TEXT DEFAULT '[]')''')
     run_migrations(cursor)
     populate_initial_quests()
     populate_initial_achievements()
+    populate_initial_trivia()
 
     conn.commit()
     conn.close()
@@ -942,4 +1145,84 @@ async def update_perm_damage_bonus(user_id, guild_id, bonus_to_add):
     """Cộng thêm bonus sát thương vĩnh viễn cho người dùng."""
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("UPDATE users SET perm_damage_bonus = perm_damage_bonus + ? WHERE user_id = ? AND guild_id = ?", (bonus_to_add, user_id, guild_id))
+        await db.commit()
+
+
+async def get_random_trivia_question():
+    """Lấy một câu hỏi đố vui ngẫu nhiên chưa được sử dụng từ DB."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM trivia_questions WHERE is_used = 0") as cursor:
+            unused_questions = await cursor.fetchall()
+
+        if not unused_questions:
+            await db.execute("UPDATE trivia_questions SET is_used = 0")
+            await db.commit()
+            print("[Trivia] Tất cả câu hỏi đã được sử dụng. Đang reset lại danh sách.")
+            async with db.execute("SELECT * FROM trivia_questions WHERE is_used = 0") as cursor:
+                unused_questions = await cursor.fetchall()
+
+        if not unused_questions:
+            return None
+
+        chosen_question = random.choice(unused_questions)
+        await db.execute("UPDATE trivia_questions SET is_used = 1 WHERE question_id = ?", (chosen_question['question_id'],))
+        await db.commit()
+
+        # Giải mã chuỗi JSON từ database thành một list Python
+        options_list = json.loads(chosen_question['options'])
+
+        return {
+            "text": chosen_question['question_text'],
+            "options": options_list,
+            "correct": chosen_question['correct_answer'],
+            "category": chosen_question['category']
+        }
+# database.py (thêm vào cuối file)
+
+
+async def add_active_trivia(message_id, guild_id, channel_id, correct_answer, expiry_timestamp_str):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            "INSERT INTO active_trivia (message_id, guild_id, channel_id, correct_answer, expiry_timestamp) VALUES (?, ?, ?, ?, ?)",
+            (message_id, guild_id, channel_id, correct_answer, expiry_timestamp_str)
+        )
+        await db.commit()
+
+
+async def get_active_trivia(message_id):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM active_trivia WHERE message_id = ?", (message_id,)) as cursor:
+            return await cursor.fetchone()
+
+
+async def update_answered_users(message_id, user_id):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT answered_users_json FROM active_trivia WHERE message_id = ?", (message_id,)) as cursor:
+            row = await cursor.fetchone()
+        if not row:
+            return
+
+        users = json.loads(row[0])  # Sửa lại chỉ số [0] để lấy đúng cột
+        if user_id not in users:
+            users.append(user_id)
+
+        await db.execute("UPDATE active_trivia SET answered_users_json = ? WHERE message_id = ?", (json.dumps(users), message_id))
+        await db.commit()
+
+
+async def get_expired_trivia():
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        now_str = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        async with db.execute("SELECT * FROM active_trivia WHERE expiry_timestamp < ?", (now_str,)) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]  # Chuyển đổi thành dict
+
+
+async def remove_active_trivia(message_id):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("DELETE FROM active_trivia WHERE message_id = ?", (message_id,))
         await db.commit()

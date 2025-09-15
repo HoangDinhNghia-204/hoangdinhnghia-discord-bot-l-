@@ -6,6 +6,7 @@ import datetime
 import random
 import itertools
 import asyncio
+import json
 
 
 class BackgroundTasks(commands.Cog):
@@ -14,6 +15,7 @@ class BackgroundTasks(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.role_update_lock = asyncio.Lock()
+        self.last_weekly_reward_day = None
 
         # Tạo đối tượng múi giờ cho Việt Nam (UTC+7) để sử dụng trong các task
         self.VN_TZ = datetime.timezone(datetime.timedelta(hours=7))
@@ -47,15 +49,16 @@ class BackgroundTasks(commands.Cog):
         self.check_overdue_loans.start()
         self.assign_daily_quests.start()
         self.rainbow_role_task.start()
+        self.check_expired_trivia.start()
 
     def cog_unload(self):
-        for task in [self.check_expirations, self.weekly_leaderboard_reward, self.check_overdue_loans, self.assign_daily_quests, self.rainbow_role_task]:
+        for task in [self.check_expirations, self.weekly_leaderboard_reward, self.check_overdue_loans, self.assign_daily_quests, self.rainbow_role_task, self.check_expired_trivia]:
             task.cancel()
 
     # ===============================================
     # Task đổi màu Cầu vồng
     # ===============================================
-    @tasks.loop(seconds=5.0)  # Tần suất chạy bình thường
+    @tasks.loop(seconds=30.0)# Tần suất chạy bình thường
     async def rainbow_role_task(self):
         if self.role_update_lock.locked():
             return
@@ -83,8 +86,9 @@ class BackgroundTasks(commands.Cog):
                         print(f"-> LỖI KHÁC KHI EDIT ROLE: {edit_error}")
 
                 # Nếu không có lỗi, đảm bảo task chạy ở tần suất bình thường
-                if self.rainbow_role_task.seconds != 5.0:
-                    self.rainbow_role_task.change_interval(seconds=5.0)
+                # Trở lại 30 giây sau khi hồi phục từ rate limit
+                if getattr(self.rainbow_role_task, 'seconds', None) != 30.0:
+                    self.rainbow_role_task.change_interval(seconds=30.0)
 
             except Exception as e:
                 print(
@@ -141,27 +145,40 @@ class BackgroundTasks(commands.Cog):
     # Task trao thưởng BXH Tuần
     # ===============================================
     # Chạy task vào 8:00 sáng mỗi ngày theo giờ Việt Nam (UTC+7)
-    @tasks.loop(time=datetime.time(hour=8, minute=0, tzinfo=datetime.timezone(datetime.timedelta(hours=7))))
-    # @tasks.loop(minutes=1)
+        # ===============================================
+    # Task trao thưởng BXH Tuần (PHIÊN BẢN CẢI TIẾN)
+    # ===============================================
+    # Chạy mỗi giờ để kiểm tra, nhưng chỉ thực hiện logic vào đúng thời điểm
+    @tasks.loop(hours=1)
     async def weekly_leaderboard_reward(self):
-        # Lấy thời gian hiện tại theo múi giờ Việt Nam để kiểm tra ngày
         now_vn = datetime.datetime.now(self.VN_TZ)
 
-        # Chỉ thực hiện logic vào Thứ Hai (weekday() của Thứ Hai là 0)
-        if now_vn.weekday() != 0:
-            print(f"[{now_vn}] Bỏ qua task trao thưởng, hôm nay không phải Thứ Hai.")
+        # Điều kiện 1: Phải là Thứ Hai
+        is_monday = (now_vn.weekday() == 0)
+        
+        # Điều kiện 2: Phải sau 8 giờ sáng
+        is_after_8am = (now_vn.hour >= 8)
+
+        # Điều kiện 3: Tuần này chưa trao thưởng
+        # Lấy số tuần trong năm để định danh
+        current_week_identifier = now_vn.strftime('%Y-%W') 
+        has_rewarded_this_week = (self.last_weekly_reward_day == current_week_identifier)
+
+        # Nếu không phải là thời điểm trao thưởng, thoát ra
+        if not (is_monday and is_after_8am and not has_rewarded_this_week):
             return
 
+        # Nếu là thời điểm trao thưởng, nhưng bị khóa, chỉ in ra và chờ lần chạy sau (sau 1 tiếng)
         if self.role_update_lock.locked():
-            print(
-                f"[{now_vn}] Task trao thưởng tuần đang bị khóa, bỏ qua lần chạy này.")
+            print(f"[{now_vn}] Định trao thưởng tuần nhưng đang bị khóa. Sẽ thử lại sau 1 giờ.")
             return
 
+        # Nếu tất cả điều kiện đều ổn, tiến hành trao thưởng
         async with self.role_update_lock:
-            # Dùng giờ UTC cho log và timestamp để nhất quán
             utc_now = datetime.datetime.now(datetime.timezone.utc)
             print(f"[{utc_now}] === RUNNING WEEKLY LEADERBOARD REWARD TASK ===")
             try:
+                # ... (TOÀN BỘ LOGIC TRAO THƯỞNG CỦA BẠN GIỮ NGUYÊN Ở ĐÂY) ...
                 for guild in self.bot.guilds:
                     try:
                         config = await db.get_or_create_config(guild.id)
@@ -169,15 +186,12 @@ class BackgroundTasks(commands.Cog):
                         if not top_role_id or not (top_role := guild.get_role(top_role_id)):
                             continue
 
-                        # Xóa role khỏi TẤT CẢ các thành viên cũ (đã bỏ `break`)
-                        # Tạo bản sao để tránh lỗi khi thay đổi list
                         old_winners = list(top_role.members)
                         for member in old_winners:
                             try:
                                 await member.remove_roles(top_role, reason="Kết thúc nhiệm kỳ Top 1 tuần")
                             except discord.HTTPException as e:
-                                print(
-                                    f"     ! Lỗi khi xóa role của {member.display_name}: {e}")
+                                print(f"     ! Lỗi khi xóa role của {member.display_name}: {e}")
 
                         leaderboard = await db.get_leaderboard(guild.id, limit=1)
                         if not leaderboard:
@@ -193,22 +207,22 @@ class BackgroundTasks(commands.Cog):
                                 embed = discord.Embed(title="🏆 VINH DANH TOP 1 BẢNG XẾP HẠNG TUẦN 🏆",
                                                       description=f"Xin chúc mừng {new_winner.mention} đã xuất sắc thống trị bảng xếp hạng tuần này và nhận được danh hiệu cao quý {top_role.mention}!",
                                                       color=top_role.color or discord.Color.gold(),
-                                                      timestamp=utc_now)  # Sử dụng giờ UTC cho timestamp
-                                embed.set_thumbnail(
-                                    url=new_winner.display_avatar.url)
-                                embed.set_footer(
-                                    text="Một tuần mới, một cuộc đua mới lại bắt đầu!")
+                                                      timestamp=utc_now)
+                                embed.set_thumbnail(url=new_winner.display_avatar.url)
+                                embed.set_footer(text="Một tuần mới, một cuộc đua mới lại bắt đầu!")
                                 await channel.send(embed=embed)
 
                         except (discord.NotFound, discord.Forbidden) as e:
-                            print(
-                                f"   ! Không thể xử lý người thắng cuộc cho guild '{guild.name}': {e}")
+                            print(f"   ! Không thể xử lý người thắng cuộc cho guild '{guild.name}': {e}")
                     except Exception as e:
-                        print(
-                            f"   ! Lỗi không mong muốn trong lúc trao thưởng cho guild '{guild.name}': {e}")
+                        print(f"   ! Lỗi không mong muốn trong lúc trao thưởng cho guild '{guild.name}': {e}")
+
+                # Đánh dấu là đã trao thưởng cho tuần này thành công
+                self.last_weekly_reward_day = current_week_identifier
+                print(f"[{utc_now}] === WEEKLY LEADERBOARD REWARD TASK COMPLETED SUCCESSFULLY ===")
+
             except Exception as e:
-                print(
-                    f"[CRITICAL TASK ERROR] Task weekly_leaderboard_reward đã thất bại: {e}")
+                print(f"[CRITICAL TASK ERROR] Task weekly_leaderboard_reward đã thất bại: {e}")
 
     @weekly_leaderboard_reward.before_loop
     async def before_weekly_leaderboard_reward(self):
@@ -283,7 +297,60 @@ class BackgroundTasks(commands.Cog):
     @assign_daily_quests.before_loop
     async def before_assign_quests(self):
         await self.bot.wait_until_ready()
+        
+    @tasks.loop(minutes=5)
+    async def check_expired_trivia(self):
+        try:
+            expired_sessions = await db.get_expired_trivia()
+            if not expired_sessions:
+                return
 
+            for session in expired_sessions:
+                try:
+                    channel = self.bot.get_channel(session['channel_id']) or await self.bot.fetch_channel(session['channel_id'])
+                    message = await channel.fetch_message(session['message_id'])
+
+                    # Tạo một view mới đã bị vô hiệu hóa dựa trên các nút gốc của tin nhắn
+                    view = discord.ui.View()
+                    correct = session['correct_answer']
+                    try:
+                        # Cố gắng đọc lại các nhãn nút từ message.components
+                        if message.components:
+                            for action_row in message.components:
+                                # discord.ActionRow có thể có thuộc tính children
+                                components = getattr(action_row, 'children', None) or getattr(action_row, 'components', [])
+                                for comp in components:
+                                    label = getattr(comp, 'label', None)
+                                    if not label:
+                                        continue
+                                    style = discord.ButtonStyle.green if label == correct else discord.ButtonStyle.secondary
+                                    view.add_item(discord.ui.Button(label=label, style=style, disabled=True))
+                        else:
+                            # Không có components: tạo tối thiểu một nút hiển thị đáp án đúng
+                            view.add_item(discord.ui.Button(label=correct, style=discord.ButtonStyle.green, disabled=True))
+                    except Exception:
+                        # Phòng thủ: nếu không đọc được components, vẫn hiển thị đáp án đúng
+                        view.add_item(discord.ui.Button(label=correct, style=discord.ButtonStyle.green, disabled=True))
+
+                    # Cập nhật tin nhắn
+                    original_embed = message.embeds[0]
+                    original_embed.set_footer(text=f"Đã hết giờ! Đáp án đúng là: {session['correct_answer']}")
+                    original_embed.color = discord.Color.dark_grey()
+
+                    await message.edit(embed=original_embed, view=view)
+
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException) as e:
+                    print(f"[Trivia Task] Lỗi khi xử lý tin nhắn hết hạn {session['message_id']}: {e}")
+                finally:
+                    # Luôn xóa khỏi DB để tránh xử lý lại
+                    await db.remove_active_trivia(session['message_id'])
+
+        except Exception as e:
+            print(f"[CRITICAL TASK ERROR] Task check_expired_trivia đã gặp lỗi: {e}")
+
+    @check_expired_trivia.before_loop
+    async def before_check_expired_trivia(self):
+        await self.bot.wait_until_ready()
 
 async def setup(bot):
     await bot.add_cog(BackgroundTasks(bot))
